@@ -143,8 +143,8 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		t_rdev = stbuf->st_rdev;
 
 		const char *tmpPath = tmp_path(fpath);
-		FILE *tmpFile = fopen(tmpPath, "w");
-		FILE *f = fopen(fpath, "r");
+		FILE *tmpFile = fopen(tmpPath, "wb+");
+		FILE *f = fopen(fpath, "rb");
 
 		do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
 
