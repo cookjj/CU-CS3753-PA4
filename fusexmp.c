@@ -106,12 +106,12 @@ static void xmp_fullpath(char fpath[PATH_MAX], const char *path)
 static int xmp_getattr(const char *path, struct stat *stbuf)
 {
 	int res;
-	time_t    t_atime;   /* time of last access */
-    time_t    t_mtime;   /* time of last modification */
-    time_t    t_ctime;   /* time of last status change */
+	time_t    atime;   /* time of last access */
+    time_t    mtime;   /* time of last modification */
+    time_t    tctime;   /* time of last status change */
     dev_t     t_dev;     /* ID of device containing file */
     ino_t     t_ino;     /* inode number */
-    mode_t    t_mode;    /* protection */
+    mode_t    mode;    /* protection */
     nlink_t   t_nlink;   /* number of hard links */
     uid_t     t_uid;     /* user ID of owner */
     gid_t     t_gid;     /* group ID of owner */
@@ -129,20 +129,22 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 	/* is it a regular file? */
 	if (S_ISREG(stbuf->st_mode)){
 
-		t_atime = stbuf->st_atime;
-		t_mtime = stbuf->st_mtime;
-		t_ctime = stbuf->st_ctime;
+		/*Need to add check if file is encrypted or plain text */
+
+		atime = stbuf->st_atime;
+		mtime = stbuf->st_mtime;
+		tctime = stbuf->st_ctime;
 		t_dev = stbuf->st_dev;
 		t_ino = stbuf->st_ino;
-		t_mode = stbuf->st_mode;
+		mode = stbuf->st_mode;
 		t_nlink = stbuf->st_nlink;
 		t_uid = stbuf->st_uid;
 		t_gid = stbuf->st_gid;
 		t_rdev = stbuf->st_rdev;
 
 		const char *tmpPath = tmp_path(fpath);
-		FILE *tmpFile = fopen(tmpPath, "wb+");
-		FILE *f = fopen(fpath, "rb");
+		FILE *tmpFile = fopen(tmpPath, "w");
+		FILE *f = fopen(fpath, "r");
 
 		do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
 
@@ -150,19 +152,23 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		fclose(tmpFile);
 
 		res = lstat(fpath, stbuf);
+		if (res == -1){
+			return -errno;
+		}
 
-		stbuf->st_atime = t_atime;
-		stbuf->st_mtime = t_mtime;
-		stbuf->st_ctime = t_ctime;
+		stbuf->st_atime = atime;
+		stbuf->st_mtime = mtime;
+		stbuf->st_ctime = tctime;
 		stbuf->st_dev = t_dev;
 		stbuf->st_ino = t_ino;
-		stbuf->st_mode = t_mode;
+		stbuf->st_mode = mode;
 		stbuf->st_nlink = t_nlink;
 		stbuf->st_uid = t_uid;
 		stbuf->st_gid = t_gid;
 		stbuf->st_rdev = t_rdev;
 
 		remove(tmpPath);
+		free((void*)tmpPath);
 	}
 
 		
@@ -410,38 +416,70 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
+
 	/*
+	char fpath[PATH_MAX];
+	xmp_fullpath(fpath, path);
+
+	int fd;
+	int res;
+
+	(void) fi;
+	fd = open(fpath, O_RDONLY);
+	if (fd == -1)
+		return -errno;
+
+	res = pread(fd, buf, size, offset);
+	if (res == -1)
+		res = -errno;
+
+	close(fd);
+	return res;
+	*/
+	
 	(void) fi;
     int res;
-    int fd;
-    int action = PASS_THROUGH;
+    //int fd;
 
-    char* tmpval = NULL;
-	ssize_t valsize = 0;
+    //int action = PASS_THROUGH;
+    //char* tmpval = NULL;
+	//ssize_t valsize = 0;
 
     char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
 	
-	FILE *memstream;
+	FILE *tmpFile;
 	char *membuf;
 	size_t memlen;
-	memstream = open_memstream(&membuf, &memlen);
-
+	tmpFile = open_memstream(&membuf, &memlen);
+	//const char *tmpPath = tmp_path(fpath);
+	//fprintf(stderr, "temp file path: %s\n", tmpPath);
+	
 	FILE *f = fopen(fpath, "rb");
+	//FILE *tmpFile = fopen(tmpPath, "wb+");
+	//FILE *tmpFile = tmpfile();
 
-	do_crypt(f, memstream, action, XMP_DATA->key_phrase);
 
-	fflush(memstream);
-	fseek(memstream, 0, SEEK_SET);
+	do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
 
-	res = fread(buf, 1, memlen, memstream);
-	fclose(memstream);
-	free(membuf);
+	//fflush(tmpFile);
+	fseek(tmpFile, 0, SEEK_SET);
+
+	fprintf(stderr, "size of file: %d\n", size);
+
+	res = fread(buf, 1, size, tmpFile);
+	if (res == -1)
+		res = -errno;
+
+	fclose(tmpFile);
 	fclose(f);
+	//remove(tmpPath);
+	free(membuf);
 
 	return res;
-*/
+	
+	/*
 	int fd;
 	int res;
 	char fpath[PATH_MAX];
@@ -458,37 +496,12 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
 	close(fd);
 	return res;
-
+	*/
 }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
-	/*
-	int fd;
-	int res;
-	char *membuf;
-    size_t memlen;
-
-	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
-
-	(void) fi;
-	FILE *tmpFile = open_memstream(&membuf, &memlen);
-	FILE *f = fopen(fpath, "wb+");
-	
-	res = fwrite(buf, 1, size, tmpFile);
-
-	fflush(tmpFile);
-	fseek(tmpFile, 0, SEEK_SET);
-	
-	do_crypt(tmpFile, f, -1, XMP_DATA->key_phrase);
-	fclose(tmpFile);
-	fclose(f);
-	free(membuf);
-	
-	return res;
-	*/
 	int fd;
 	int res;
 	char fpath[PATH_MAX];
@@ -505,6 +518,55 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
 	close(fd);
 	return res;
+	/*
+	int fd;
+	int res;
+	char *membuf;
+    size_t memlen;
+
+	char fpath[PATH_MAX];
+	xmp_fullpath(fpath, path);
+
+	(void) fi;
+	//FILE *tmpFile = open_memstream(&membuf, &memlen);
+	FILE *tmpFile = tmpfile();
+	FILE *f = fopen(fpath, "wb+");
+	
+	res = fwrite(buf, 1, size, tmpFile);
+
+	//fflush(tmpFile);
+	fseek(tmpFile, 0, SEEK_SET);
+	
+	do_crypt(tmpFile, f, ENCRYPT, XMP_DATA->key_phrase);
+	fclose(tmpFile);
+	fclose(f);
+	//free(membuf);
+	
+	return res;
+	*/
+	
+	/*
+	(void) fi;
+	int fd;
+	int res;
+	char fpath[PATH_MAX];
+	xmp_fullpath(fpath, path);
+	const char *tmpPath = tmp_path(fpath);
+	
+	FILE *f = fopen(fpath, "wb+");
+	FILE *tmpFile = fopen(tmpPath, "wb+");
+
+	res = fwrite(buf, sizeof(char), size, tmpFile);
+	do_crypt(tmpFile, f, ENCRYPT, XMP_DATA->key_phrase);
+
+	if (res == -1)
+		res = -errno;
+
+	fclose(f);
+	fclose(tmpFile);
+	//remove(tmpPath);
+	return res;
+	*/
 }
 
 static int xmp_statfs(const char *path, struct statvfs *stbuf)
