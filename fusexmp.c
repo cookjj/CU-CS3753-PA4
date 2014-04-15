@@ -38,7 +38,8 @@
 /* Size of encrypted values 4 characters = 4 bytes */
 #define XATRR_VALUE_SIZE 4
 
-#define TMPSUFFIX ".really_awesome"
+#define SUFFIXGETATTR ".getattr"
+#define SUFFIXREAD ".read"
 
 
 #ifdef HAVE_CONFIG_H
@@ -81,17 +82,17 @@ struct xmp_state {
     char *key_phrase;
 };
 
-char* tmp_path(const char* old_path){
+char* tmp_path(const char* old_path, const char *suffix){
     char* new_path;
     int len=0;
-    len=strlen(old_path) + strlen(TMPSUFFIX) + 1;
+    len=strlen(old_path) + strlen(suffix) + 1;
     new_path = malloc(sizeof(char)*len);
     if(new_path == NULL){
         return NULL;
     }
     new_path[0] = '\0';
     strcat(new_path, old_path);
-    strcat(new_path, TMPSUFFIX);
+    strcat(new_path, suffix);
     return new_path;
 }
 
@@ -142,16 +143,20 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		t_gid = stbuf->st_gid;
 		t_rdev = stbuf->st_rdev;
 
-		const char *tmpPath = tmp_path(fpath);
+		const char *tmpPath = tmp_path(fpath, SUFFIXGETATTR);
 		FILE *tmpFile = fopen(tmpPath, "wb+");
 		FILE *f = fopen(fpath, "rb");
 
-		do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
+		fprintf(stderr, "fpath: %s\ntmpPath: %s\n", fpath, tmpPath);
+
+		if(!do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase)){
+		fprintf(stderr, "do_crypt failed\n");
+    	}
 
 		fclose(f);
 		fclose(tmpFile);
 
-		res = lstat(fpath, stbuf);
+		res = lstat(tmpPath, stbuf);
 		if (res == -1){
 			return -errno;
 		}
@@ -436,7 +441,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	close(fd);
 	return res;
 	*/
-	
+	/*
 	(void) fi;
     int res;
     //int fd;
@@ -460,8 +465,10 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	//FILE *tmpFile = fopen(tmpPath, "wb+");
 	//FILE *tmpFile = tmpfile();
 
-
-	do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
+	if(!do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase)){
+	fprintf(stderr, "do_crypt failed\n");
+    }
+	//do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
 
 	//fflush(tmpFile);
 	fseek(tmpFile, 0, SEEK_SET);
@@ -472,31 +479,49 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	if (res == -1)
 		res = -errno;
 
-	fclose(tmpFile);
+	//fclose(tmpFile);
 	fclose(f);
 	//remove(tmpPath);
 	free(membuf);
 
 	return res;
+	*/
 	
-	/*
-	int fd;
+	
+	//int fd;
 	int res;
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
+	const char *tmpPath = tmp_path(fpath, SUFFIXREAD);
 
 	(void) fi;
-	fd = open(fpath, O_RDONLY);
-	if (fd == -1)
-		return -errno;
 
-	res = pread(fd, buf, size, offset);
+	FILE *f = fopen(fpath, "rb");
+	FILE *tmpFile = fopen(tmpPath, "wb+");
+
+
+	if(!do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase)){
+	fprintf(stderr, "do_crypt failed\n");
+    }
+
+
+    fseek(tmpFile, 0, SEEK_END);
+    size_t tmpFilelen = ftell(tmpFile);
+    fseek(tmpFile, 0, SEEK_SET);
+
+    fprintf(stderr, "size given by read: %d\nsize of tmpFile: %d\nsize of offset: %d\n", size, tmpFilelen, offset);
+
+
+    res = fread(buf, 1, tmpFilelen, tmpFile);
 	if (res == -1)
 		res = -errno;
 
-	close(fd);
+	fclose(f);
+	remove(tmpPath);
+	free((void*)tmpPath);
+
 	return res;
-	*/
+	
 }
 
 static int xmp_write(const char *path, const char *buf, size_t size,
