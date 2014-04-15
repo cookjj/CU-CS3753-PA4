@@ -106,73 +106,67 @@ static void xmp_fullpath(char fpath[PATH_MAX], const char *path)
 static int xmp_getattr(const char *path, struct stat *stbuf)
 {
 	int res;
+	time_t    t_atime;   /* time of last access */
+    time_t    t_mtime;   /* time of last modification */
+    time_t    t_ctime;   /* time of last status change */
+    dev_t     t_dev;     /* ID of device containing file */
+    ino_t     t_ino;     /* inode number */
+    mode_t    t_mode;    /* protection */
+    nlink_t   t_nlink;   /* number of hard links */
+    uid_t     t_uid;     /* user ID of owner */
+    gid_t     t_gid;     /* group ID of owner */
+    dev_t     t_rdev;    /* device ID (if special file) */
 	
 
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
-
 	res = lstat(fpath, stbuf);
-
+	if (res == -1){
+			return -errno;
+	}
+	
+	/* is it a regular file? */
 	if (S_ISREG(stbuf->st_mode)){
 
-		FILE *tmpFile = tmpfile();
-		FILE *f = fopen(fpath, "wb+");
+		t_atime = stbuf->st_atime;
+		t_mtime = stbuf->st_mtime;
+		t_ctime = stbuf->st_ctime;
+		t_dev = stbuf->st_dev;
+		t_ino = stbuf->st_ino;
+		t_mode = stbuf->st_mode;
+		t_nlink = stbuf->st_nlink;
+		t_uid = stbuf->st_uid;
+		t_gid = stbuf->st_gid;
+		t_rdev = stbuf->st_rdev;
 
-		fseek(f, 0, SEEK_END);
-		long fsize = ftell(f);
-		fseek(f, 0, SEEK_SET);
+		const char *tmpPath = tmp_path(fpath);
+		FILE *tmpFile = fopen(tmpPath, "wb+");
+		FILE *f = fopen(fpath, "rb");
 
-		char *buffer = malloc(fsize+1);
-		fread(buffer, fsize, 1, f);
-		fwrite(buffer, 1, fsize, tmpFile);
-
-		do_crypt(tmpFile, f, DECRYPT, XMP_DATA->key_phrase);
+		do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
 
 		fclose(f);
 		fclose(tmpFile);
-		free(buffer);
 
 		res = lstat(fpath, stbuf);
-		if (res == -1){
-			return -errno;
-		}
+
+		stbuf->st_atime = t_atime;
+		stbuf->st_mtime = t_mtime;
+		stbuf->st_ctime = t_ctime;
+		stbuf->st_dev = t_dev;
+		stbuf->st_ino = t_ino;
+		stbuf->st_mode = t_mode;
+		stbuf->st_nlink = t_nlink;
+		stbuf->st_uid = t_uid;
+		stbuf->st_gid = t_gid;
+		stbuf->st_rdev = t_rdev;
+
+		remove(tmpPath);
 	}
 
+		
 
-
-	
-	/*
-	res = lstat(fpath, stbuf);
-    if (res == -1){
-        return -errno;
-    }
-
-if(S_ISREG(stbuf->st_mode)){
-        atime = stbuf->st_atime;
-        mtime = stbuf->st_mtime;
-        ctime = stbuf->st_ctime;
-        mode = stbuf->st_mode;
-
-        const char* tmpPath = tmp_path(fpath);
-        FILE *f = fopen(fpath, "rb");
-		FILE *tmpFile = fopen(tmpPath, "wb");
-        do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
-        fclose(f);
-		fclose(tmpFile);
-        res = lstat(tmpPath, stbuf);
-        if (res == -1){
-            return -errno;
-        }
-
-        stbuf->st_atime = atime;
-        stbuf->st_mtime = mtime;
-        stbuf->st_ctime = ctime;
-        stbuf->st_mode= mode;
-
-        remove(tmpPath);
-    }
-*/
 	return 0;
 }
 
