@@ -160,17 +160,20 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		tmpval = malloc(sizeof(*tmpval)*(valsize));
 		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, tmpval, valsize);
 		
-		fprintf(stderr, "Xattr Value: %s\nXattr size: %zu\n", tmpval, sizeof(*tmpval)*(valsize));
+		//fprintf(stderr, "Xattr Value: %s\nXattr size: %zu\n", tmpval, sizeof(*tmpval)*(valsize));
+		fprintf(stderr, "Xattr Value: %s\n", tmpval);
 
 		/* If the specified attribute doesn't exist or it's set to false */
 		if (valsize < 0 || memcmp(tmpval, "false", 5) == 0){
 			if(errno == ENOATTR){
 				fprintf(stderr, "No %s attribute set\n", XATRR_ENCRYPTED_FLAG);
 			}
-			fprintf(stderr, "file is unencrypted, leaving crypt_action as pass-through\n valsize is %zu\n", valsize);
+			//fprintf(stderr, "file is unencrypted, leaving crypt_action as pass-through\n valsize is %zu\n", valsize);
+			fprintf(stderr, "file is unencrypted, leaving crypt_action as pass-through\n");
 		}
 		else if (memcmp(tmpval, "true", 4) == 0){
-			fprintf(stderr, "file is encrypted, need to decrypt\nvalsize is %zu\n", valsize);
+			//fprintf(stderr, "file is encrypted, need to decrypt\nvalsize is %zu\n", valsize);
+			fprintf(stderr, "file is encrypted, need to decrypt\n");
 			crypt_action = DECRYPT;
 		}
 
@@ -181,7 +184,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		fprintf(stderr, "fpath: %s\ntmpPath: %s\n", fpath, tmpPath);
 
 		if(!do_crypt(f, tmpFile, crypt_action, XMP_DATA->key_phrase)){
-		fprintf(stderr, "do_crypt failed\n");
+		fprintf(stderr, "getattr do_crypt failed\n");
     	}
 
 		fclose(f);
@@ -486,17 +489,17 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		tmpval = malloc(sizeof(*tmpval)*(valsize));
 		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, tmpval, valsize);
 		
-		fprintf(stderr, " Read: Xattr Value: %s\nXattr size: %zu\n", tmpval, sizeof(*tmpval)*(valsize));
+		fprintf(stderr, " Read: Xattr Value: %s\n", tmpval);
 
 		/* If the specified attribute doesn't exist or it's set to false */
 		if (valsize < 0 || memcmp(tmpval, "false", 5) == 0){
 			if(errno == ENOATTR){
 				fprintf(stderr, "Read: No %s attribute set\n", XATRR_ENCRYPTED_FLAG);
 			}
-			fprintf(stderr, "Read: file is unencrypted, leaving crypt_action as pass-through\n valsize is %zu\n", valsize);
+			fprintf(stderr, "Read: file is unencrypted, leaving crypt_action as pass-through\n");
 		}
 		else if (memcmp(tmpval, "true", 4) == 0){
-			fprintf(stderr, "Read: file is encrypted, need to decrypt\nvalsize is %zu\n", valsize);
+			fprintf(stderr, "Read: file is encrypted, need to decrypt\n");
 			crypt_action = DECRYPT;
 		}
 
@@ -507,7 +510,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		fprintf(stderr, "Read: fpath: %s\ntmpPath: %s\n", fpath, tmpPath);
 
 		if(!do_crypt(f, tmpFile, crypt_action, XMP_DATA->key_phrase)){
-		fprintf(stderr, "read: do_crypt failed\n");
+		fprintf(stderr, "Read: do_crypt failed\n");
     	}
 
     	fseek(tmpFile, 0, SEEK_END);
@@ -613,28 +616,37 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 	return 0;
 }
 
-/* Set file attribute to encrypted */
 static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
-
-
-	//char fpath[PATH_MAX];
-	//xmp_fullpath(fpath, path);
 
 	
     char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
+	
 
     (void) fi;
+    (void) mode;
 
-    int res;
-    res = creat(fpath, mode);
-    if(res == -1)
-	return -errno;
+	FILE *f = fopen(fpath, "wb+");
 
-    close(res);
+	fprintf(stderr, "CREATE: fpath: %s\n", fpath);
+
+	if(!do_crypt(f, f, ENCRYPT, XMP_DATA->key_phrase)){
+		fprintf(stderr, "Create: do_crypt failed\n");
+    	}
+
+	fprintf(stderr, "Create: encryption done correctly\n");
+
+	fclose(f);
+	//fclose(tmpFile);
+
+	if(setxattr(fpath, XATRR_ENCRYPTED_FLAG, ENCRYPTED, 4, 0)){
+    	fprintf(stderr, "error setting xattr of file %s\n", fpath);
+    	return -errno;
+   	}
+   	fprintf(stderr, "Create: file xatrr correctly set %s\n", fpath);
+    
 
     return 0;
-    
 }
 
 
