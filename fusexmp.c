@@ -41,6 +41,11 @@
 #define SUFFIXGETATTR ".getattr"
 #define SUFFIXREAD ".read"
 
+#ifdef linux
+/* Linux is missing ENOATTR error, using ENODATA instead */
+#define ENOATTR ENODATA
+#endif
+
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
@@ -64,6 +69,7 @@
 #include <stddef.h>
 #include <sys/types.h>
 #include <limits.h>
+
 
 
 #ifdef HAVE_SETXATTR
@@ -107,6 +113,11 @@ static void xmp_fullpath(char fpath[PATH_MAX], const char *path)
 static int xmp_getattr(const char *path, struct stat *stbuf)
 {
 	int res;
+	int crypt_action = PASS_THROUGH;
+	ssize_t valsize = 0;
+	char *tmpval = NULL;
+
+
 	time_t    atime;   /* time of last access */
     time_t    mtime;   /* time of last modification */
     time_t    tctime;   /* time of last status change */
@@ -143,13 +154,29 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		t_gid = stbuf->st_gid;
 		t_rdev = stbuf->st_rdev;
 
+		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, NULL, 0);
+		tmpval = malloc(sizeof(*tmpval)*(valsize));
+		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, tmpval, valsize);
+		
+		fprintf(stderr, "Xattr Value: %s\nXattr size: %zu\n", tmpval, sizeof(*tmpval)*(valsize));
+		if (valsize < 0 || memcmp(tmpval, "false", 5) == 0){
+			if(errno == ENOATTR){
+				fprintf(stderr, "No %s attribute set\n", XATRR_ENCRYPTED_FLAG);
+			}
+			fprintf(stderr, "file is unencrypted leaving crypt_action as pass-through\n valsize is %zu\n", valsize);
+		}
+		else if (memcmp(tmpval, "true", 4) == 0){
+			fprintf(stderr, "file is encrypted, need to decrypt\nvalsize is %zu\n", valsize);
+			crypt_action = DECRYPT;
+		}
+
 		const char *tmpPath = tmp_path(fpath, SUFFIXGETATTR);
 		FILE *tmpFile = fopen(tmpPath, "wb+");
 		FILE *f = fopen(fpath, "rb");
 
 		fprintf(stderr, "fpath: %s\ntmpPath: %s\n", fpath, tmpPath);
 
-		if(!do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase)){
+		if(!do_crypt(f, tmpFile, crypt_action, XMP_DATA->key_phrase)){
 		fprintf(stderr, "do_crypt failed\n");
     	}
 
@@ -172,6 +199,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		stbuf->st_gid = t_gid;
 		stbuf->st_rdev = t_rdev;
 
+		free(tmpval);
 		remove(tmpPath);
 		free((void*)tmpPath);
 	}
@@ -422,7 +450,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
 
-	/*
+	
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
@@ -440,7 +468,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
 	close(fd);
 	return res;
-	*/
+	
 	/*
 	(void) fi;
     int res;
@@ -487,7 +515,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	return res;
 	*/
 	
-	
+	/*
 	//int fd;
 	int res;
 	char fpath[PATH_MAX];
@@ -521,6 +549,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	free((void*)tmpPath);
 
 	return res;
+	*/
 	
 }
 
