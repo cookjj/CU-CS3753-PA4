@@ -40,6 +40,8 @@
 
 #define SUFFIXGETATTR ".getattr"
 #define SUFFIXREAD ".read"
+#define SUFFIXWRITE ".write"
+#define SUFFIXCREATE ".create"
 
 #ifdef linux
 /* Linux is missing ENOATTR error, using ENODATA instead */
@@ -141,8 +143,6 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 	/* is it a regular file? */
 	if (S_ISREG(stbuf->st_mode)){
 
-		/*Need to add check if file is encrypted or plain text */
-
 		atime = stbuf->st_atime;
 		mtime = stbuf->st_mtime;
 		tctime = stbuf->st_ctime;
@@ -154,16 +154,20 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		t_gid = stbuf->st_gid;
 		t_rdev = stbuf->st_rdev;
 
+
+		/* Need to add check if file is encrypted or plain text */
 		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, NULL, 0);
 		tmpval = malloc(sizeof(*tmpval)*(valsize));
 		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, tmpval, valsize);
 		
 		fprintf(stderr, "Xattr Value: %s\nXattr size: %zu\n", tmpval, sizeof(*tmpval)*(valsize));
+
+		/* If the specified attribute doesn't exist or it's set to false */
 		if (valsize < 0 || memcmp(tmpval, "false", 5) == 0){
 			if(errno == ENOATTR){
 				fprintf(stderr, "No %s attribute set\n", XATRR_ENCRYPTED_FLAG);
 			}
-			fprintf(stderr, "file is unencrypted leaving crypt_action as pass-through\n valsize is %zu\n", valsize);
+			fprintf(stderr, "file is unencrypted, leaving crypt_action as pass-through\n valsize is %zu\n", valsize);
 		}
 		else if (memcmp(tmpval, "true", 4) == 0){
 			fprintf(stderr, "file is encrypted, need to decrypt\nvalsize is %zu\n", valsize);
@@ -201,7 +205,6 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 
 		free(tmpval);
 		remove(tmpPath);
-		free((void*)tmpPath);
 	}
 
 		
@@ -450,7 +453,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
 
-	
+	/*
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
@@ -468,88 +471,62 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
 	close(fd);
 	return res;
-	
-	/*
-	(void) fi;
-    int res;
-    //int fd;
-
-    //int action = PASS_THROUGH;
-    //char* tmpval = NULL;
-	//ssize_t valsize = 0;
-
-    char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
-
-	
-	FILE *tmpFile;
-	char *membuf;
-	size_t memlen;
-	tmpFile = open_memstream(&membuf, &memlen);
-	//const char *tmpPath = tmp_path(fpath);
-	//fprintf(stderr, "temp file path: %s\n", tmpPath);
-	
-	FILE *f = fopen(fpath, "rb");
-	//FILE *tmpFile = fopen(tmpPath, "wb+");
-	//FILE *tmpFile = tmpfile();
-
-	if(!do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase)){
-	fprintf(stderr, "do_crypt failed\n");
-    }
-	//do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase);
-
-	//fflush(tmpFile);
-	fseek(tmpFile, 0, SEEK_SET);
-
-	fprintf(stderr, "size of file: %d\n", size);
-
-	res = fread(buf, 1, size, tmpFile);
-	if (res == -1)
-		res = -errno;
-
-	//fclose(tmpFile);
-	fclose(f);
-	//remove(tmpPath);
-	free(membuf);
-
-	return res;
 	*/
-	
-	/*
-	//int fd;
+
+	(void)fi;
 	int res;
+	int crypt_action = PASS_THROUGH;
+	ssize_t valsize = 0;
+	char *tmpval = NULL;
+
 	char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
-	const char *tmpPath = tmp_path(fpath, SUFFIXREAD);
 
-	(void) fi;
+		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, NULL, 0);
+		tmpval = malloc(sizeof(*tmpval)*(valsize));
+		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, tmpval, valsize);
+		
+		fprintf(stderr, " Read: Xattr Value: %s\nXattr size: %zu\n", tmpval, sizeof(*tmpval)*(valsize));
 
-	FILE *f = fopen(fpath, "rb");
-	FILE *tmpFile = fopen(tmpPath, "wb+");
+		/* If the specified attribute doesn't exist or it's set to false */
+		if (valsize < 0 || memcmp(tmpval, "false", 5) == 0){
+			if(errno == ENOATTR){
+				fprintf(stderr, "Read: No %s attribute set\n", XATRR_ENCRYPTED_FLAG);
+			}
+			fprintf(stderr, "Read: file is unencrypted, leaving crypt_action as pass-through\n valsize is %zu\n", valsize);
+		}
+		else if (memcmp(tmpval, "true", 4) == 0){
+			fprintf(stderr, "Read: file is encrypted, need to decrypt\nvalsize is %zu\n", valsize);
+			crypt_action = DECRYPT;
+		}
 
+		const char *tmpPath = tmp_path(fpath, SUFFIXREAD);
+		FILE *tmpFile = fopen(tmpPath, "wb+");
+		FILE *f = fopen(fpath, "rb");
 
-	if(!do_crypt(f, tmpFile, DECRYPT, XMP_DATA->key_phrase)){
-	fprintf(stderr, "do_crypt failed\n");
-    }
+		fprintf(stderr, "Read: fpath: %s\ntmpPath: %s\n", fpath, tmpPath);
 
+		if(!do_crypt(f, tmpFile, crypt_action, XMP_DATA->key_phrase)){
+		fprintf(stderr, "read: do_crypt failed\n");
+    	}
 
-    fseek(tmpFile, 0, SEEK_END);
-    size_t tmpFilelen = ftell(tmpFile);
-    fseek(tmpFile, 0, SEEK_SET);
+    	fseek(tmpFile, 0, SEEK_END);
+    	size_t tmpFilelen = ftell(tmpFile);
+    	fseek(tmpFile, 0, SEEK_SET);
 
-    fprintf(stderr, "size given by read: %d\nsize of tmpFile: %d\nsize of offset: %d\n", size, tmpFilelen, offset);
+    	fprintf(stderr, "Read: size given by read: %zu\nsize of tmpFile: %zu\nsize of offset: %zu\n", size, tmpFilelen, offset);
 
+    	res = fread(buf, 1, tmpFilelen, tmpFile);
+    	if (res == -1)
+    		res = -errno;
 
-    res = fread(buf, 1, tmpFilelen, tmpFile);
-	if (res == -1)
-		res = -errno;
+		fclose(f);
+		fclose(tmpFile);
+		remove(tmpPath);
+		free(tmpval);
 
-	fclose(f);
-	remove(tmpPath);
-	free((void*)tmpPath);
-
-	return res;
-	*/
+		return res;
+	
 	
 }
 
@@ -639,31 +616,11 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 /* Set file attribute to encrypted */
 static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
 
-/*
-	(void) fi;
-	(void) mode;
 
-	char fpath[PATH_MAX];
-	xmp_fullpath(fpath, path);
+	//char fpath[PATH_MAX];
+	//xmp_fullpath(fpath, path);
 
-    char *membuf;
-    size_t memlen;
-    FILE *stream = open_memstream(&membuf, &memlen);
-    FILE *f = fopen(fpath, "wb");
-
-    if(f == NULL || stream == NULL)
-		return -errno;
 	
-    if(!do_crypt(stream, f, ENCRYPT, XMP_DATA->key_phrase)){
-	fprintf(stderr, "do_crypt failed for creating a file\n");
-    }
-
-    fclose(stream);
-    fclose(f);
-    free(membuf);
-
-    return 0;
-*/
     char fpath[PATH_MAX];
 	xmp_fullpath(fpath, path);
 
@@ -677,6 +634,7 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
     close(res);
 
     return 0;
+    
 }
 
 
