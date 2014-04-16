@@ -615,10 +615,10 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 		fclose(f);
 		fclose(tmpFile);
 
-		if(setxattr(fpath, XATRR_ENCRYPTED_FLAG, ENCRYPTED, 4, 0)){
-    	fprintf(stderr, "error setting xattr of file %s\n", fpath);
-    	return -errno;
-   		}
+		//if(setxattr(fpath, XATRR_ENCRYPTED_FLAG, ENCRYPTED, 4, 0)){
+    	//fprintf(stderr, "error setting xattr of file %s\n", fpath);
+    	//return -errno;
+   		//}
 		remove(tmpPath);
     	
 	}
@@ -635,10 +635,10 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
 		close(fd);
 
-		if(setxattr(fpath, XATRR_ENCRYPTED_FLAG, UNENCRYPTED, 5, 0)){
-    	fprintf(stderr, "error setting xattr of file %s\n", fpath);
-    	return -errno;
-   		}
+		//if(setxattr(fpath, XATRR_ENCRYPTED_FLAG, UNENCRYPTED, 5, 0)){
+    	//fprintf(stderr, "error setting xattr of file %s\n", fpath);
+    	//return -errno;
+   		//}
    	}
 		
 		/*
