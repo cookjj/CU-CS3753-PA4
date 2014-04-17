@@ -588,7 +588,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 		}
 		fclose(f);
 		fclose(tmpFile);
-		//remove(tmpPath);
+		remove(tmpPath);
     	
 	}
 	else if (crypt_action == PASS_THROUGH){
