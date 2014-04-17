@@ -60,6 +60,7 @@
 #include <sys/xattr.h>
 #endif
 
+/* This if for the do_crypt function */
 #include "aes-crypt.h"
 
 /* Define command line usage of file */
@@ -72,7 +73,9 @@ struct xmp_state {
     char *key_phrase;
 };
 
-/* This is function that creates physical temporary file */
+/* This is function that creates physical temporary file
+*	Credit to Alex Beal for this function
+ */
 char* tmp_path(const char* old_path, const char *suffix){
     char* new_path;
     int len=0;
@@ -633,6 +636,10 @@ static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) 
 	FILE *f = fopen(fpath, "wb+");
 
 	fprintf(stderr, "CREATE: fpath: %s\n", fpath);
+
+	/* It is okay to encrypt a file into itself as long as it's empty
+	*	otherwise the contents of the file would be erased.
+	*/
 
 	if(!do_crypt(f, f, ENCRYPT, XMP_DATA->key_phrase)){
 		fprintf(stderr, "Create: do_crypt failed\n");
