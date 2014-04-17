@@ -19,6 +19,7 @@
 #define ENCRYPTED "true"
 #define UNENCRYPTED "false"
 
+/* File suffixes for the tmp_path function to distinguish which function is calling it*/
 #define SUFFIXGETATTR ".getattr"
 #define SUFFIXREAD ".read"
 #define SUFFIXWRITE ".write"
@@ -93,7 +94,7 @@ static void xmp_fullpath(char fpath[PATH_MAX], const char *path)
     strncat(fpath, path, PATH_MAX); 
 }
 
-/* This function gets certain characteristics of a file like size */
+/* This function gets certain characteristics of a file like size and stores them in a struct called stat */
 static int xmp_getattr(const char *path, struct stat *stbuf)
 {
 	int res;
@@ -125,6 +126,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 	/* is it a regular file? */
 	if (S_ISREG(stbuf->st_mode)){
 
+		/* These file characteristics don't change after decryption so just storing them */
 		atime = stbuf->st_atime;
 		mtime = stbuf->st_mtime;
 		tctime = stbuf->st_ctime;
@@ -137,7 +139,7 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		t_rdev = stbuf->st_rdev;
 
 
-		/* Need to add check if file is encrypted or plain text */
+		/* Get size of flag value and value itself */
 		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, NULL, 0);
 		tmpval = malloc(sizeof(*tmpval)*(valsize));
 		valsize = getxattr(fpath, XATRR_ENCRYPTED_FLAG, tmpval, valsize);
@@ -152,7 +154,8 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 			}
 			//fprintf(stderr, "file is unencrypted, leaving crypt_action as pass-through\n valsize is %zu\n", valsize);
 			fprintf(stderr, "file is unencrypted, leaving crypt_action as pass-through\n");
-		}
+
+		} /* If the attribute exists and is true then we need to get size of decrypted file */
 		else if (memcmp(tmpval, "true", 4) == 0){
 			//fprintf(stderr, "file is encrypted, need to decrypt\nvalsize is %zu\n", valsize);
 			fprintf(stderr, "file is encrypted, need to decrypt\n");
@@ -172,11 +175,13 @@ static int xmp_getattr(const char *path, struct stat *stbuf)
 		fclose(f);
 		fclose(tmpFile);
 
+		/* Get size of decrypted file and store in stat struct */
 		res = lstat(tmpPath, stbuf);
 		if (res == -1){
 			return -errno;
 		}
 
+		/* Put info about file we did not want to change back into stat struct*/
 		stbuf->st_atime = atime;
 		stbuf->st_mtime = mtime;
 		stbuf->st_ctime = tctime;
@@ -434,6 +439,7 @@ static int xmp_open(const char *path, struct fuse_file_info *fi)
 	return 0;
 }
 
+/* This function reads file contents into application window */
 static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 		    struct fuse_file_info *fi)
 {
@@ -459,7 +465,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 			fprintf(stderr, "Read: No %s attribute set\n", XATRR_ENCRYPTED_FLAG);
 		}
 		fprintf(stderr, "Read: file is unencrypted, leaving crypt_action as pass-through\n");
-	}
+	}/* If the attribute exists and is true then we need to get size of decrypted file */
 	else if (memcmp(tmpval, "true", 4) == 0){
 		fprintf(stderr, "Read: file is encrypted, need to decrypt\n");
 		crypt_action = DECRYPT;
@@ -481,6 +487,7 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 
     fprintf(stderr, "Read: size given by read: %zu\nsize of tmpFile: %zu\nsize of offset: %zu\n", size, tmpFilelen, offset);
 
+    /* Read the decrypted contents of original file to the application widow */
     res = fread(buf, 1, tmpFilelen, tmpFile);
     if (res == -1)
     	res = -errno;
@@ -495,6 +502,9 @@ static int xmp_read(const char *path, char *buf, size_t size, off_t offset,
 	
 }
 
+/* Write contents to encrypted or unencrypted file
+*	Echo was used to write to files.  See bottom of README, IMPORTANT NOTES.
+*/
 static int xmp_write(const char *path, const char *buf, size_t size,
 		     off_t offset, struct fuse_file_info *fi)
 {
@@ -521,7 +531,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 			fprintf(stderr, "WRITE: No %s attribute set\n", XATRR_ENCRYPTED_FLAG);
 		}
 		fprintf(stderr, "WRITE: file is unencrypted, leaving crypt_action as pass-through\n");
-	}
+	}/* If the attribute exists and is true then we need to get size of decrypted file */
 	else if (memcmp(tmpval, "true", 4) == 0){
 		fprintf(stderr, "WRITE: file is encrypted, need to decrypt\n");
 		crypt_action = DECRYPT;
@@ -529,7 +539,7 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
 	fprintf(stderr, "crypt_action is set to %d\n", crypt_action);
 
-
+	/* If the file to be written to is encrypted */
 	if (crypt_action == DECRYPT){
 		fprintf(stderr, "WRITE: File to be written is encrypted\n");
 		
@@ -551,14 +561,15 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 
     	fseek(f, 0, SEEK_SET);
 
-    	//fseek(tmpFile, 0, SEEK_END);
     	size_t tmpFilelen = ftell(tmpFile);
     	fprintf(stderr, "Size to be written to tmpFile %zu\n", size);
     	fprintf(stderr, "size of tmpFile %zu\n", tmpFilelen);
     	fprintf(stderr, "Writing to tmpFile\n");
+
     	res = fwrite(buf, 1, size, tmpFile);
     	if (res == -1)
 			res = -errno;
+
 		tmpFilelen = ftell(tmpFile);
 		fprintf(stderr, "Size of tmpFile after write %zu\n", tmpFilelen);
 
@@ -568,11 +579,12 @@ static int xmp_write(const char *path, const char *buf, size_t size,
 		if(!do_crypt(tmpFile, f, ENCRYPT, XMP_DATA->key_phrase)){
 		fprintf(stderr, "WRITE: do_crypt failed\n");
 		}
+
 		fclose(f);
 		fclose(tmpFile);
 		remove(tmpPath);
     	
-	}
+	}/* If the file to be written to is unencrypted */
 	else if (crypt_action == PASS_THROUGH){
 		fprintf(stderr, "File to be written is unencrypted");
 
@@ -603,6 +615,10 @@ static int xmp_statfs(const char *path, struct statvfs *stbuf)
 
 	return 0;
 }
+
+/* Create a file with encrypted contents and encrypted flag
+* An empty file is encrypted so that you can't tell if it is empty or not
+*/
 
 static int xmp_create(const char* path, mode_t mode, struct fuse_file_info* fi) {
 
@@ -769,17 +785,19 @@ int main(int argc, char *argv[])
 
     /* Pulling out key phrase for encryption/decryption in write, read, create in fuse_operations */
     xmp_data->key_phrase = argv[1];
+
+    /* Displaying key_phrase and mirror path */
     fprintf(stdout, "key_phrase = %s\n", xmp_data->key_phrase);
     fprintf(stdout, "mirror_dir = %s\n", xmp_data->mirror_dir);
 
     /* Passing only 3 arguments, this includes any flags such as -d, from argv to fuse_main because fuse main will
     * use these in other fuse functions: program name and mount point and optional flags
     */
-    argv[1] = argv[3];
-    argv[2] = argv[4];
+    argv[1] = argv[3];//Moving mount directory to second argument
+    argv[2] = argv[4];//Moving flag to third argument
     argv[3] = NULL;
     argv[4] = NULL;
-    argc = argc - 2;
+    argc = argc - 2; // making sure number of arguments matches up with size of argv
 
 	return fuse_main(argc, argv, &xmp_oper, xmp_data);
 }
